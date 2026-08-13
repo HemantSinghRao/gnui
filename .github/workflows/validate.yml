@@ -1,0 +1,114 @@
+# Checks every pull request that adds a contributor file.
+#
+# Why pull_request_target: it gives the workflow permission to post the
+# welcome comment even when the pull request comes from a fork - which is
+# exactly what happens when a student edits from their phone.
+#
+# Why that is safe here: we check out THIS repository's code (the base
+# branch), never the student's branch. The student's file is only ever read
+# as text with `git show`. No student-supplied code is ever run.
+name: Checks
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: checks-${{ github.event.number }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: ${{ matrix.title }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - check: place
+            title: File is in the right place
+          - check: format
+            title: Formatting is valid
+          - check: username
+            title: Username matches the filename
+          - check: duplicate
+            title: No duplicate entry
+    steps:
+      - name: Get this repository's own code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get the proposed file (read as text, never run)
+        run: |
+          git fetch --no-tags --depth=50 origin \
+            "+refs/pull/${{ github.event.number }}/head:refs/pr"
+
+      - name: ${{ matrix.title }}
+        run: |
+          python3 scripts/validate.py \
+            --check ${{ matrix.check }} \
+            --base ${{ github.event.pull_request.base.sha }} \
+            --head refs/pr
+
+  welcome:
+    name: Say hello
+    needs: check
+    if: success()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get the proposed file (read as text, never run)
+        run: |
+          git fetch --no-tags --depth=50 origin \
+            "+refs/pull/${{ github.event.number }}/head:refs/pr"
+
+      - name: Read their name out of the file
+        id: entry
+        run: |
+          python3 scripts/validate.py --check info \
+            --base ${{ github.event.pull_request.base.sha }} \
+            --head refs/pr >> "$GITHUB_OUTPUT"
+
+      - name: Say hello, once
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NUMBER: ${{ github.event.number }}
+          NAME: ${{ steps.entry.outputs.name }}
+        run: |
+          if gh pr view "$NUMBER" --json comments --jq '.comments[].body' \
+              | grep -q '<!-- welcome -->'; then
+            echo "Already said hello on this pull request."
+            exit 0
+          fi
+          cat > welcome.md <<EOF
+          <!-- welcome -->
+          ### All four checks passed, $NAME 🎉
+
+          You just did the thing most people never get around to: you opened a
+          pull request on a public repository. That is real, and it stays on
+          your GitHub profile.
+
+          **What happens next**
+
+          1. A maintainer merges this. It usually takes a minute or two.
+          2. The moment it merges, a robot rebuilds the contributor wall and
+             your card appears on it.
+          3. Refresh the wall and find yourself:
+             https://hemantsinghrao.github.io/gnui/
+
+          **After today**, if you want a second pull request, have a look at
+          [good-first-issues.md](https://github.com/HemantSinghRao/gnui/blob/main/good-first-issues.md).
+          Every task in there is small, real, and written for somebody who did
+          their first pull request today.
+          EOF
+          gh pr comment "$NUMBER" --body-file welcome.md

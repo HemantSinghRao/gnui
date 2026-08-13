@@ -1,0 +1,45 @@
+# Rebuilds the contributor wall whenever somebody new is merged into main.
+#
+# The whole page is regenerated from scratch every time, so if two merges
+# land at once it is safe to cancel the older run - the newer one already
+# includes everybody.
+name: Build the wall
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "contributors/**"
+      - "scripts/build_wall.py"
+      - ".github/workflows/build-wall.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-wall
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Rebuild docs/index.html
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate the page
+        run: python3 scripts/build_wall.py
+
+      - name: Commit it back, if it changed
+        run: |
+          if git diff --quiet -- docs/index.html; then
+            echo "The wall is already up to date."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/index.html
+          git commit -m "Rebuild the contributor wall"
+          git push
