@@ -1,0 +1,58 @@
+# Copy this file to  .github/workflows/deploy.yml  in your own project.
+#
+# It does two things, in that order:
+#   1. runs the tests
+#   2. if - and only if - the tests passed, puts the site on the internet
+#
+# Every line is explained in README.md, in this folder.
+#
+# (Sitting here inside examples/, this file does nothing. GitHub only runs
+#  workflows from the .github/workflows folder at the top of a repository.)
+name: Test and deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Run the tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - run: node --test
+
+  deploy:
+    name: Put it on the internet
+    needs: test
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+
+      - id: deployment
+        uses: actions/deploy-pages@v4
